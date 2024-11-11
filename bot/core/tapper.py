@@ -65,14 +65,56 @@ class Tapper:
 
     def _load_account_data(self) -> dict:
         try:
-            with open("accounts.json", "r") as f:
-                accounts = json.load(f)
-                for account in accounts:
-                    if account["session_name"] == self.session_name:
-                        return account
+            # Пытаемся загрузить существующий файл
+            if os.path.exists("accounts.json"):
+                with open("accounts.json", "r", encoding='utf-8') as f:
+                    accounts = json.load(f)
+                    for account in accounts:
+                        if account["session_name"] == self.session_name:
+                            return account
+            
+            # Если файл не существует или аккаунт не найден, создаем новые данные
+            new_account = {
+                "session_name": self.session_name,
+                "user_agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+                "proxy": None
+            }
+            
+            # Создаем или обновляем файл accounts.json
+            accounts = []
+            if os.path.exists("accounts.json"):
+                try:
+                    with open("accounts.json", "r", encoding='utf-8') as f:
+                        accounts = json.load(f)
+                except json.JSONDecodeError:
+                    # Если файл поврежден, начинаем с пустого списка
+                    accounts = []
+            
+            # Добавляем новый аккаунт, если его еще нет
+            account_exists = False
+            for account in accounts:
+                if account["session_name"] == self.session_name:
+                    account_exists = True
+                    break
+            
+            if not account_exists:
+                accounts.append(new_account)
+                
+            # Сохраняем обновленный список аккаунтов
+            with open("accounts.json", "w", encoding='utf-8') as f:
+                json.dump(accounts, f, indent=2, ensure_ascii=False)
+            
+            logger.info(f"{self.session_name} | Created new account data")
+            return new_account
+            
         except Exception as e:
-            logger.error(f"{self.session_name} | Error loading account data: {e}")
-        return {}
+            logger.error(f"{self.session_name} | Error managing account data: {e}")
+            # Возвращаем базовые данные в случае ошибки
+            return {
+                "session_name": self.session_name,
+                "user_agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+                "proxy": None
+            }
 
     def get_headers(self, with_auth: bool = False):
         headers = get_headers(self.user_agent, self.token if with_auth else None)
