@@ -1,19 +1,8 @@
-# Полный формат с логином и паролем
-socks5://login:password@host:port
-socks5://host:port:login:password 
-protocol:host:port:login:password
+# Формат: login:password@ip:port
+# Пример:
+user:pass@1.1.1.1:8080
+user:pass@2.2.2.2:1080
 
-# Формат только с паролем
-socks5://host:port::password
-protocol:host:port:password
-
-# Простой формат без авторизации
-socks5://host:port
-protocol:host:port
-
-# Примеры:
-socks5://proxy.example.com:1080:user:pass
-socks5://proxy.example.com:1080:pass
-socks5://user:pass@proxy.example.com:1080
-http://proxy.example.com:8080
-proxy.example.com:1080:user:pass  # будет считаться как socks5
+# Без авторизации:
+# 3.3.3.3:8080
+# 4.4.4.4:1080

@@ -92,6 +92,7 @@
 | **API_HASH**               |                      | Хеш приложения Telegram                                     |
 | **REF_ID**                 |          | Реферальный ID для новых аккаунтов                          |
 | **SQUAD_ID**               |                  | ID целевой команды                                          |
+| **SQUAD_ID_APP**           |                  | ID команды в приложении                                        |
 | **USE_PROXY_FROM_FILE**    | False                | Использовать прокси из файла proxies.txt                    |
 | **MULTITHREADING**         | False                | Включить многопоточный режим                                |
 | **DELAY_BEFORE_START**     | [1, 5]               | Задержка перед стартом сессии (сек)                         |
@@ -107,6 +108,24 @@
 | **MIN_SQUAD_POOL_AMOUNT** | 0.1                  | Минимальная сумма для отправки в пул команды              |
 | **ENABLE_MAIN_POOL**      | True                 | Включить отправку в основной пул                           |
 | **ENABLE_SQUAD_POOL**     | True                 | Включить отправку в пул команды                            |
+
+### Настройка прокси
+1. Установите `USE_PROXY_FROM_FILE=True` в `.env`
+2. Укажите `PROXY_TYPE` в `.env` (поддерживаются: "socks5" или "http")
+3. Создайте файл `proxies.txt` в папке `bot/config/` используя следующий формат:
+   ```
+   login:password@ip:port
+   ```
+   Или без авторизации:
+   ```
+   ip:port
+   ```
+
+Пример proxies.txt:
+```
+user:pass@1.1.1.1:8080
+2.2.2.2:1080
+```
 
 ---
 

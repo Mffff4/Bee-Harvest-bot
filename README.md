@@ -93,6 +93,7 @@
 | **API_HASH**              |                      | Telegram API application hash                                 |
 | **REF_ID**                |          | Referral ID for new accounts                                  |
 | **SQUAD_ID**              |                  | Target squad ID                                               |
+| **SQUAD_ID_APP**          |                  | Target squad ID in app                                       |
 | **USE_PROXY_FROM_FILE**   | False                | Use proxies from proxies.txt file                             |
 | **MULTITHREADING**        | False                | Enable multithreading mode                                    |
 | **DELAY_BEFORE_START**    | [1, 5]               | Delay before session start (sec)                              |
@@ -108,6 +109,24 @@
 | **MIN_SQUAD_POOL_AMOUNT**| 0.1                  | Minimum amount to send to squad pool                          |
 | **ENABLE_MAIN_POOL**     | True                 | Enable sending to main pool                                   |
 | **ENABLE_SQUAD_POOL**    | True                 | Enable sending to squad pool                                  |
+
+### Proxy Configuration
+1. Set `USE_PROXY_FROM_FILE=True` in `.env`
+2. Set `PROXY_TYPE` in `.env` (supported: "socks5" or "http")
+3. Create `proxies.txt` in `bot/config/` folder using the following format:
+   ```
+   login:password@ip:port
+   ```
+   Or without authentication:
+   ```
+   ip:port
+   ```
+
+Example proxies.txt:
+```
+user:pass@1.1.1.1:8080
+2.2.2.2:1080
+```
 
 ---
 

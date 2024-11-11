@@ -1,17 +1,17 @@
 from pydantic_settings import BaseSettings, SettingsConfigDict
+from typing import Optional
 
 
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_file=".env", env_ignore_empty=True)
 
-    API_ID: int
-    API_HASH: str
+    API_ID: Optional[int] = None
+    API_HASH: Optional[str] = None
     REF_ID: str = "6344320439"
+    SQUAD_ID: str = "4acFkDo5"
     USE_PROXY_FROM_FILE: bool = False
-    VALIDATE_PROXIES: bool = True
-    PROXY_TYPES: list[str] = ["socks5", "socks4", "http", "https"]
+    PROXY_TYPE: str = "socks5"
     PROXY_TIMEOUT: int = 30
-    PROXY_CHECK_URL: str = "http://api.ipify.org?format=json"
 
     DELAY_BEFORE_START: list[int] = [1, 5]
     DELAY_BETWEEN_ACTIONS: list[int] = [1, 3]
@@ -44,8 +44,8 @@ class Settings(BaseSettings):
     MIN_SQUAD_POOL_AMOUNT: float = 0.1
     
     SQUAD_POOL_RESERVE: float = 100.0
-    SQUAD_POOL_SEND_PERCENT: float = 25
-    SQUAD_ID: int = 2581
+    SQUAD_POOL_SEND_PERCENT: float = 10
+    SQUAD_ID_APP: int = 2581
     
     MULTITHREADING: bool = False
 
@@ -54,6 +54,12 @@ class Settings(BaseSettings):
 
     def __init__(self, **data):
         super().__init__(**data)
+
+        if self.API_ID is None:
+            raise ValueError("API_ID must be set in .env file")
+        if self.API_HASH is None:
+            raise ValueError("API_HASH must be set in .env file")
+
         self.MAX_RETRIES = max(1, self.MAX_RETRIES)
         self.PROXY_TIMEOUT = max(1, self.PROXY_TIMEOUT)
         self.RETRY_DELAY[0] = max(1, self.RETRY_DELAY[0])

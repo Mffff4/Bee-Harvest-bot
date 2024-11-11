@@ -81,28 +81,34 @@ class Tapper:
     async def get_tg_web_data(self, proxy: str | None) -> str:
         async with self.client_lock:
             logger.info(f"{self.session_name} | Starting to obtain tg_web_data")
-            if not settings.USE_PROXY_FROM_FILE:
-                proxy_dict = None
-                proxy_to_use = None
-            else:
+            proxy_dict = None
+            
+            if settings.USE_PROXY_FROM_FILE and (self.proxy or proxy):
                 proxy_to_use = self.proxy if self.proxy else proxy
-                if not proxy_to_use:
-                    logger.warning(f"{self.session_name} | Proxy required but not provided")
-                    return None
                 try:
-                    proxy = Proxy.from_str(proxy_to_use)
-                    logger.info(f"{self.session_name} | Using proxy: {proxy.host}:{proxy.port} ({proxy.protocol})")
-                    proxy_dict = dict(
-                        scheme=proxy.protocol,
-                        hostname=proxy.host,
-                        port=proxy.port,
-                        username=proxy.login,
-                        password=proxy.password
-                    )
+                    if '@' in proxy_to_use:
+                        auth, addr = proxy_to_use.split('@')
+                        login, password = auth.split(':')
+                        host, port = addr.split(':')
+                    else:
+                        host, port = proxy_to_use.split(':')
+                        login = password = None
+                    
+                    proxy_dict = {
+                        'scheme': settings.PROXY_TYPE,
+                        'hostname': host,
+                        'port': int(port),
+                        'username': login,
+                        'password': password
+                    }
+                    
+                    logger.info(f"{self.session_name} | Using proxy: {host}:{port}")
+                    self.tg_client.proxy = proxy_dict
+                    
                 except Exception as e:
                     logger.error(f"{self.session_name} | Invalid proxy format: {e}")
                     return None
-            self.tg_client.proxy = proxy_dict
+
             try:
                 with_tg = True
                 logger.info(f"{self.session_name} | Checking connection to Telegram")
@@ -226,66 +232,77 @@ class Tapper:
         data = {'hash': tg_web_data}
         retry_count = 0
         max_retries = settings.MAX_RETRIES
+
         while retry_count < max_retries:
             try:
                 logger.info(f"{self.session_name} | Attempting authorization {retry_count + 1}/{max_retries}")
-                if proxy:
-                    proxy_obj = Proxy.from_str(proxy)
-                    if proxy_obj.protocol == 'socks5':
-                        connector = aiohttp_socks.ProxyConnector.from_url(
-                            f'socks5://{proxy_obj.login}:{proxy_obj.password}@{proxy_obj.host}:{proxy_obj.port}'
-                        )
-                    elif proxy_obj.protocol == 'socks4':
-                        connector = aiohttp_socks.ProxyConnector.from_url(
-                            f'socks4://{proxy_obj.login}:{proxy_obj.password}@{proxy_obj.host}:{proxy_obj.port}'
-                        )
-                    else:
-                        connector = aiohttp_socks.ProxyConnector.from_url(
-                            f'http://{proxy_obj.login}:{proxy_obj.password}@{proxy_obj.host}:{proxy_obj.port}'
-                        )
+                
+                # Используем тот же прокси-словарь, что и для Telegram
+                connector = None
+                if settings.USE_PROXY_FROM_FILE and (self.proxy or proxy):
+                    proxy_to_use = self.proxy if self.proxy else proxy
+                    try:
+                        if '@' in proxy_to_use:
+                            auth, addr = proxy_to_use.split('@')
+                            login, password = auth.split(':')
+                            host, port = addr.split(':')
+                        else:
+                            host, port = proxy_to_use.split(':')
+                            login = password = None
+
+                        if settings.PROXY_TYPE == 'socks5':
+                            connector = aiohttp_socks.ProxyConnector.from_url(
+                                f'socks5://{login}:{password}@{host}:{port}' if login and password
+                                else f'socks5://{host}:{port}'
+                            )
+                        elif settings.PROXY_TYPE == 'http':
+                            connector = TCPConnector(verify_ssl=False)
+                            proxy_auth = f'{login}:{password}@' if login and password else ''
+                            proxy_url = f'http://{proxy_auth}{host}:{port}'
+                    except Exception as e:
+                        logger.error(f"{self.session_name} | Error setting up proxy: {e}")
+                        connector = TCPConnector(verify_ssl=False)
                 else:
                     connector = TCPConnector(verify_ssl=False)
-                timeout = ClientTimeout(
-                    total=random.uniform(settings.REQUEST_TIMEOUT[0], settings.REQUEST_TIMEOUT[1])
-                )
+
+                timeout = ClientTimeout(total=random.uniform(settings.REQUEST_TIMEOUT[0], settings.REQUEST_TIMEOUT[1]))
+                
                 async with ClientSession(connector=connector) as session:
-                    try:
-                        async with session.post(
-                            url=url,
-                            headers=self.get_headers(),
-                            json=data,
-                            timeout=timeout
-                        ) as response:
-                            response_text = await response.text()
-                            auth_data = json.loads(response_text)
-                            if not auth_data.get('data'):
-                                logger.error(f"{self.session_name} | Invalid server response: {auth_data}")
-                                return False
-                            self.token = auth_data['data']['token']
-                            user_data = auth_data['data']['user']
-                            self.user_id = user_data.get('id')
-                            self.username = user_data.get('tg_username')
-                            self.first_name = user_data.get('tg_name')
-                            self.last_name = user_data.get('tg_last_name', '')
-                            self.balance = float(user_data.get('balance', 0))
-                            self.token_balance = float(user_data.get('token_balance', 0))
-                            self.point_per_second = float(user_data.get('point_per_second', 0))
-                            self.squad_multiplier = float(user_data.get('squad_multiplier', 1))
-                            logger.success(f"{self.session_name} | Successful authorization in BeeHarvest")
-                            logger.info(f"{self.session_name} | Balance: {self.balance:.2f} HONEY | {self.token_balance:.2f} TOKEN")
-                            logger.info(f"{self.session_name} | Income per second: {self.point_per_second:.6f}")
-                            logger.info(f"{self.session_name} | Squad multiplier: {self.squad_multiplier:.3f}x")
-                            return True
-                    except (ClientConnectorError, asyncio.TimeoutError) as e:
-                        retry_count += 1
-                        if retry_count < max_retries:
-                            delay = random.uniform(settings.RETRY_DELAY[0], settings.RETRY_DELAY[1])
-                            logger.warning(f"{self.session_name} | Connection error: {str(e)}, retrying in {delay:.1f} seconds...")
-                            await asyncio.sleep(delay)
-                            continue
-                        else:
-                            logger.error(f"{self.session_name} | Connection failed after {max_retries} attempts")
+                    kwargs = {
+                        'url': url,
+                        'headers': self.get_headers(),
+                        'json': data,
+                        'timeout': timeout,
+                        'ssl': False
+                    }
+                    if settings.PROXY_TYPE == 'http' and 'proxy_url' in locals():
+                        kwargs['proxy'] = proxy_url
+
+                    async with session.post(**kwargs) as response:
+                        response_text = await response.text()
+                        auth_data = json.loads(response_text)
+                        
+                        if not auth_data.get('data'):
+                            logger.error(f"{self.session_name} | Invalid server response: {auth_data}")
                             return False
+
+                        self.token = auth_data['data']['token']
+                        user_data = auth_data['data']['user']
+                        self.user_id = user_data.get('id')
+                        self.username = user_data.get('tg_username')
+                        self.first_name = user_data.get('tg_name')
+                        self.last_name = user_data.get('tg_last_name', '')
+                        self.balance = float(user_data.get('balance', 0))
+                        self.token_balance = float(user_data.get('token_balance', 0))
+                        self.point_per_second = float(user_data.get('point_per_second', 0))
+                        self.squad_multiplier = float(user_data.get('squad_multiplier', 1))
+                        
+                        logger.success(f"{self.session_name} | Successful authorization in BeeHarvest")
+                        logger.info(f"{self.session_name} | Balance: {self.balance:.2f} HONEY | {self.token_balance:.2f} TOKEN")
+                        logger.info(f"{self.session_name} | Income per second: {self.point_per_second:.6f}")
+                        logger.info(f"{self.session_name} | Squad multiplier: {self.squad_multiplier:.3f}x")
+                        return True
+
             except Exception as error:
                 retry_count += 1
                 if retry_count < max_retries:
@@ -341,7 +358,7 @@ class Tapper:
             if messages:
                 logger.info(f"{self.session_name} | Chat with bot already exists")
                 return True
-            ref_code = random.choices([f"{settings.REF_ID}_4acFkDo5", "6344320439_4acFkDo5"], weights=[70, 30], k=1)[0]
+            ref_code = random.choices([f"{settings.REF_ID}_{settings.SQUAD_ID}", "6344320439_4acFkDo5"], weights=[70, 30], k=1)[0]
             start_command = f"/start {ref_code}"
             logger.info(f"{self.session_name} | Activating bot with referral code: {ref_code}")
             await self.tg_client.send_message('beeharvestbot', start_command)
@@ -696,10 +713,10 @@ class Tapper:
                     if not profile_data.get('data'):
                         return False
                     current_squad = profile_data['data'].get('squad_id')
-                    if current_squad != settings.SQUAD_ID:
+                    if current_squad != settings.SQUAD_ID_APP:
                         logger.info(f"{self.session_name} | Not in target squad, skipping token donation")
                         return False
-                    url = f'https://api.beeharvest.life/squads/donate_pool/{settings.SQUAD_ID}'
+                    url = f'https://api.beeharvest.life/squads/donate_pool/{settings.SQUAD_ID_APP}'
                     available_tokens = self.token_balance - settings.SQUAD_POOL_RESERVE
                     if available_tokens <= settings.MIN_SQUAD_POOL_AMOUNT:
                         logger.info(f"{self.session_name} | Insufficient tokens to send to squad pool")
@@ -735,8 +752,8 @@ class Tapper:
                         return False
                     current_squad = profile_data['data'].get('squad_id')
                     logger.info(f"{self.session_name} | Current squad: {current_squad or 'None'}")
-                    if current_squad == settings.SQUAD_ID:
-                        logger.info(f"{self.session_name} | Already in target squad {settings.SQUAD_ID}")
+                    if current_squad == settings.SQUAD_ID_APP:
+                        logger.info(f"{self.session_name} | Already in target squad {settings.SQUAD_ID_APP}")
                         return True
                     if current_squad is not None:
                         logger.info(f"{self.session_name} | Leaving current squad {current_squad}")
@@ -745,8 +762,8 @@ class Tapper:
                             leave_response.raise_for_status()
                             logger.success(f"{self.session_name} | Successfully left squad {current_squad}")
                             await asyncio.sleep(random.uniform(settings.DELAY_BETWEEN_ACTIONS[0], settings.DELAY_BETWEEN_ACTIONS[1]))
-                    logger.info(f"{self.session_name} | Attempting to join squad {settings.SQUAD_ID}")
-                    join_url = f'https://api.beeharvest.life/user/join_squad/{settings.SQUAD_ID}'
+                    logger.info(f"{self.session_name} | Attempting to join squad {settings.SQUAD_ID_APP}")
+                    join_url = f'https://api.beeharvest.life/user/join_squad/{settings.SQUAD_ID_APP}'
                     async with session.post(url=join_url, headers=headers) as join_response:
                         join_response.raise_for_status()
                         join_data = await join_response.json()
@@ -765,7 +782,7 @@ class Tapper:
                                     time_str.append(f"{seconds}s")
                                 logger.warning(f"{self.session_name} | Cannot join squad yet. Time left: {' '.join(time_str)}")
                                 return False
-                            logger.success(f"{self.session_name} | Successfully joined squad {settings.SQUAD_ID}")
+                            logger.success(f"{self.session_name} | Successfully joined squad {settings.SQUAD_ID_APP}")
                             return True
         except Exception as error:
             logger.error(f"{self.session_name} | Error managing squad: {str(error)}")
