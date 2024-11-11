@@ -229,7 +229,7 @@ class Tapper:
     async def authorize(self, tg_web_data: str, proxy: str | None):
         logger.info(f"{self.session_name} | Starting authorization in BeeHarvest")
         url = 'https://api.beeharvest.life/auth/validate'
-        data = {'hash': tg_web_data}
+        data = {'hash': str(tg_web_data) if tg_web_data else ''}
         retry_count = 0
         max_retries = settings.MAX_RETRIES
 
@@ -237,7 +237,6 @@ class Tapper:
             try:
                 logger.info(f"{self.session_name} | Attempting authorization {retry_count + 1}/{max_retries}")
                 
-                # Используем тот же прокси-словарь, что и для Telegram
                 connector = None
                 if settings.USE_PROXY_FROM_FILE and (self.proxy or proxy):
                     proxy_to_use = self.proxy if self.proxy else proxy
@@ -286,12 +285,12 @@ class Tapper:
                             logger.error(f"{self.session_name} | Invalid server response: {auth_data}")
                             return False
 
-                        self.token = auth_data['data']['token']
-                        user_data = auth_data['data']['user']
-                        self.user_id = user_data.get('id')
-                        self.username = user_data.get('tg_username')
-                        self.first_name = user_data.get('tg_name')
-                        self.last_name = user_data.get('tg_last_name', '')
+                        self.token = str(auth_data['data']['token']) if auth_data['data'].get('token') else None
+                        user_data = auth_data['data'].get('user', {})
+                        self.user_id = int(user_data.get('id', 0))
+                        self.username = str(user_data.get('tg_username', '')) or None
+                        self.first_name = str(user_data.get('tg_name', '')) or None
+                        self.last_name = str(user_data.get('tg_last_name', '')) or None
                         self.balance = float(user_data.get('balance', 0))
                         self.token_balance = float(user_data.get('token_balance', 0))
                         self.point_per_second = float(user_data.get('point_per_second', 0))
