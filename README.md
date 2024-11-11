@@ -87,6 +87,14 @@
 
 ## ⚙️ Settings
 
+**1. REF_ID - these are the numbers that come after the "=" sign
+2. SQUAD_ID - this is the combination of characters that comes after the "_" sign
+
+Example:
+In the link https://t.me/beeharvestbot?start=6344320439_4acFkDo5
+REF_ID = 6344320439
+SQUAD_ID = 4acFkDo5​​​​​​​​​​​​​​​​**
+
 | Parameter                  | Default Value         | Description                                                 |
 |---------------------------|----------------------|---------------------------------------------------------------|
 | **API_ID**                |                      | Telegram API application ID                                   |
