@@ -126,82 +126,110 @@ class Tapper:
     async def get_tg_web_data(self, proxy: str | None) -> str:
         async with self.client_lock:
             logger.info(f"{self.session_name} | Starting to obtain tg_web_data")
-            proxy_dict = None
             
-            if settings.USE_PROXY_FROM_FILE and (self.proxy or proxy):
+            if not settings.USE_PROXY_FROM_FILE:
+                proxy_dict = None
+                proxy_to_use = None
+            else:
                 proxy_to_use = self.proxy if self.proxy else proxy
+                
+                if not proxy_to_use:
+                    logger.warning(f"{self.session_name} | Proxy required but not provided")
+                    return None
+                
                 try:
-                    if '@' in proxy_to_use:
-                        auth, addr = proxy_to_use.split('@')
-                        login, password = auth.split(':')
-                        host, port = addr.split(':')
-                    else:
-                        host, port = proxy_to_use.split(':')
-                        login = password = None
-                    
-                    proxy_dict = {
-                        'scheme': settings.PROXY_TYPE,
-                        'hostname': host,
-                        'port': int(port),
-                        'username': login,
-                        'password': password
-                    }
-                    
-                    logger.info(f"{self.session_name} | Using proxy: {host}:{port}")
-                    self.tg_client.proxy = proxy_dict
-                    
+                    proxy = Proxy.from_str(proxy_to_use)
+                    logger.info(f"{self.session_name} | Using proxy: {proxy.host}:{proxy.port} ({proxy.protocol})")
+                    proxy_dict = dict(
+                        scheme=proxy.protocol,
+                        hostname=proxy.host,
+                        port=proxy.port,
+                        username=proxy.login,
+                        password=proxy.password
+                    )
                 except Exception as e:
                     logger.error(f"{self.session_name} | Invalid proxy format: {e}")
                     return None
 
-            try:
-                with_tg = True
-                logger.info(f"{self.session_name} | Checking connection to Telegram")
-                if not self.tg_client.is_connected:
-                    with_tg = False
-                    logger.info(f"{self.session_name} | Connecting to Telegram...")
-                    try:
-                        await self.tg_client.connect()
-                        logger.success(f"{self.session_name} | Successfully connected to Telegram")
-                    except (Unauthorized, UserDeactivated, AuthKeyUnregistered):
-                        logger.error(f"{self.session_name} | Session is invalid")
-                        raise InvalidSession(self.session_name)
-                    except Exception as e:
-                        logger.error(f"{self.session_name} | Error connecting to Telegram: {str(e)}")
-                        raise
-                if not await self.activate_bot_with_ref(proxy):
-                    logger.error(f"{self.session_name} | Failed to activate bot")
-                    return None
-                logger.info(f"{self.session_name} | Obtaining peer ID for BeeHarvest bot")
-                peer = await self.tg_client.resolve_peer('beeharvestbot')
-                InputBotApp = types.InputBotAppShortName(bot_id=peer, short_name="bee")
-                logger.info(f"{self.session_name} | Requesting web view")
-                web_view = await self.tg_client.invoke(RequestAppWebView(peer=peer, app=InputBotApp, platform='android', write_allowed=True, start_param=""))
-                auth_url = web_view.url
-                logger.info(f"{self.session_name} | Received authorization URL")
-                tg_web_data = unquote(string=auth_url.split('tgWebAppData=', maxsplit=1)[1].split('&tgWebAppVersion', maxsplit=1)[0])
-                logger.success(f"{self.session_name} | Successfully obtained web view data")
+            self.tg_client.proxy = proxy_dict
+            max_retries = 3
+            retry_count = 0
+            
+            while retry_count < max_retries:
                 try:
-                    if self.user_id == 0:
-                        logger.info(f"{self.session_name} | Obtaining user information")
-                        information = await self.tg_client.get_me()
-                        self.user_id = information.id
-                        self.first_name = information.first_name or ''
-                        self.last_name = information.last_name or ''
-                        self.username = information.username or ''
-                        logger.info(f"{self.session_name} | User: {self.username} ({self.user_id})")
-                except Exception as e:
-                    logger.warning(f"{self.session_name} | Failed to obtain user information: {str(e)}")
-                if not with_tg:
-                    logger.info(f"{self.session_name} | Disconnecting from Telegram")
-                    await self.tg_client.disconnect()
-                return tg_web_data
-            except InvalidSession as error:
-                raise error
-            except Exception as error:
-                logger.error(f"{self.session_name} | Unknown error during authorization: {str(error)}")
-                await asyncio.sleep(3)
-                return None
+                    with_tg = True
+                    logger.info(f"{self.session_name} | Checking connection to Telegram")
+                    
+                    if self.tg_client.is_connected:
+                        await self.tg_client.disconnect()
+                        await asyncio.sleep(1)
+                    
+                    if not self.tg_client.is_connected:
+                        with_tg = False
+                        logger.info(f"{self.session_name} | Connecting to Telegram...")
+                        try:
+                            await self.tg_client.connect()
+                            logger.success(f"{self.session_name} | Successfully connected to Telegram")
+                        except (Unauthorized, UserDeactivated, AuthKeyUnregistered):
+                            logger.error(f"{self.session_name} | Session is invalid")
+                            raise InvalidSession(self.session_name)
+                        except Exception as e:
+                            if "database is locked" in str(e):
+                                retry_count += 1
+                                delay = random.uniform(2, 5)
+                                logger.warning(f"{self.session_name} | Database is locked, retrying in {delay:.1f} seconds... (Attempt {retry_count}/{max_retries})")
+                                await asyncio.sleep(delay)
+                                continue
+                            logger.error(f"{self.session_name} | Error connecting to Telegram: {str(e)}")
+                            raise
+
+                    if not await self.activate_bot_with_ref(proxy):
+                        logger.error(f"{self.session_name} | Failed to activate bot")
+                        return None
+                        
+                    logger.info(f"{self.session_name} | Obtaining peer ID for BeeHarvest bot")
+                    peer = await self.tg_client.resolve_peer('beeharvestbot')
+                    InputBotApp = types.InputBotAppShortName(bot_id=peer, short_name="bee")
+                    logger.info(f"{self.session_name} | Requesting web view")
+                    web_view = await self.tg_client.invoke(RequestAppWebView(peer=peer, app=InputBotApp, platform='android', write_allowed=True, start_param=""))
+                    auth_url = web_view.url
+                    logger.info(f"{self.session_name} | Received authorization URL")
+                    tg_web_data = unquote(string=auth_url.split('tgWebAppData=', maxsplit=1)[1].split('&tgWebAppVersion', maxsplit=1)[0])
+                    logger.success(f"{self.session_name} | Successfully obtained web view data")
+                    
+                    try:
+                        if self.user_id == 0:
+                            logger.info(f"{self.session_name} | Obtaining user information")
+                            information = await self.tg_client.get_me()
+                            self.user_id = information.id
+                            self.first_name = information.first_name or ''
+                            self.last_name = information.last_name or ''
+                            self.username = information.username or ''
+                            logger.info(f"{self.session_name} | User: {self.username} ({self.user_id})")
+                    except Exception as e:
+                        logger.warning(f"{self.session_name} | Failed to obtain user information: {str(e)}")
+                    
+                    if not with_tg:
+                        logger.info(f"{self.session_name} | Disconnecting from Telegram")
+                        await self.tg_client.disconnect()
+                    return tg_web_data
+                    
+                except InvalidSession as error:
+                    raise error
+                except Exception as error:
+                    if "database is locked" in str(error):
+                        retry_count += 1
+                        if retry_count < max_retries:
+                            delay = random.uniform(2, 5)
+                            logger.warning(f"{self.session_name} | Database is locked, retrying in {delay:.1f} seconds... (Attempt {retry_count}/{max_retries})")
+                            await asyncio.sleep(delay)
+                            continue
+                    logger.error(f"{self.session_name} | Unknown error during authorization: {str(error)}")
+                    await asyncio.sleep(3)
+                    return None
+                    
+            logger.error(f"{self.session_name} | Failed to connect after {max_retries} attempts")
+            return None
 
     def _get_proxy_url(self, proxy: str | None) -> str | None:
         if not proxy:
