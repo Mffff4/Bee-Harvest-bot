@@ -44,7 +44,7 @@ class Settings(BaseSettings):
     MIN_SQUAD_POOL_AMOUNT: float = 0.1
     
     SQUAD_POOL_RESERVE: float = 100.0
-    SQUAD_POOL_SEND_PERCENT: float = 25
+    SQUAD_POOL_SEND_PERCENT: float = 10
     SQUAD_ID: int = 2581
     
     MULTITHREADING: bool = False
