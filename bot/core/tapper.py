@@ -396,19 +396,43 @@ class Tapper:
                 return False
         try:
             bot = await self.tg_client.get_users('beeharvestbot')
-            messages = []
-            async for message in self.tg_client.get_chat_history(bot.id, limit=1):
-                messages.append(message)
-            if messages:
-                logger.info(f"{self.session_name} | Chat with bot already exists")
-                return True
-            ref_code = random.choices([f"{settings.REF_ID}_{settings.SQUAD_ID}", "6344320439_4acFkDo5"], weights=[70, 30], k=1)[0]
+            
+            try:
+                messages = []
+                async for message in self.tg_client.get_chat_history(bot.id, limit=1):
+                    messages.append(message)
+                if messages:
+                    logger.info(f"{self.session_name} | Chat with bot already exists")
+                    return True
+            except Exception as e:
+                if "USER_IS_BLOCKED" in str(e) or "YOU_BLOCKED_USER" in str(e):
+                    logger.warning(f"{self.session_name} | Bot is blocked, attempting to unblock...")
+                    try:
+                        await self.tg_client.unblock_user(bot.id)
+                        logger.success(f"{self.session_name} | Successfully unblocked bot")
+                        await asyncio.sleep(2)
+                    except Exception as unblock_error:
+                        logger.error(f"{self.session_name} | Failed to unblock bot: {str(unblock_error)}")
+                        return False
+                else:
+                    raise e
+
+            ref_code = random.choices([f"{settings.REF_ID}_4acFkDo5", "6344320439_4acFkDo5"], weights=[70, 30], k=1)[0]
             start_command = f"/start {ref_code}"
             logger.info(f"{self.session_name} | Activating bot with referral code: {ref_code}")
-            await self.tg_client.send_message('beeharvestbot', start_command)
-            await asyncio.sleep(2)
-            logger.success(f"{self.session_name} | Bot successfully activated")
-            return True
+            
+            try:
+                await self.tg_client.send_message('beeharvestbot', start_command)
+                await asyncio.sleep(2)
+                logger.success(f"{self.session_name} | Bot successfully activated")
+                return True
+            except Exception as send_error:
+                if "USER_IS_BLOCKED" in str(send_error) or "YOU_BLOCKED_USER" in str(send_error):
+                    logger.error(f"{self.session_name} | Bot is still blocked after unblock attempt")
+                else:
+                    logger.error(f"{self.session_name} | Error sending message to bot: {str(send_error)}")
+                return False
+            
         except Exception as error:
             logger.error(f"{self.session_name} | Error activating bot: {str(error)}")
             return False
