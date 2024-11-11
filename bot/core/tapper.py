@@ -17,6 +17,8 @@ import os
 from bot.utils.logger import logger
 from bot.config import settings
 import aiohttp_socks
+from bot.core.user_agents import load_or_generate_user_agent
+from bot.utils.proxy import proxy_manager
 console = Console()
 logging.getLogger("pyrogram").setLevel(logging.WARNING)
 logging.getLogger("pyrogram.session.auth").setLevel(logging.WARNING)
@@ -65,42 +67,43 @@ class Tapper:
 
     def _load_account_data(self) -> dict:
         try:
-            # Пытаемся загрузить существующий файл
             if os.path.exists("accounts.json"):
                 with open("accounts.json", "r", encoding='utf-8') as f:
                     accounts = json.load(f)
                     for account in accounts:
                         if account["session_name"] == self.session_name:
+                            if not account.get("user_agent"):
+                                account["user_agent"], _ = load_or_generate_user_agent(self.session_name)
+                            account["proxy"] = proxy_manager.get_proxy(self.session_name)
                             return account
             
-            # Если файл не существует или аккаунт не найден, создаем новые данные
+            user_agent, _ = load_or_generate_user_agent(self.session_name)
+            proxy = proxy_manager.get_proxy(self.session_name)
+            
             new_account = {
                 "session_name": self.session_name,
-                "user_agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-                "proxy": None
+                "user_agent": user_agent,
+                "proxy": proxy
             }
             
-            # Создаем или обновляем файл accounts.json
             accounts = []
             if os.path.exists("accounts.json"):
                 try:
                     with open("accounts.json", "r", encoding='utf-8') as f:
                         accounts = json.load(f)
                 except json.JSONDecodeError:
-                    # Если файл поврежден, начинаем с пустого списка
                     accounts = []
             
-            # Добавляем новый аккаунт, если его еще нет
             account_exists = False
             for account in accounts:
                 if account["session_name"] == self.session_name:
+                    account.update(new_account)
                     account_exists = True
                     break
             
             if not account_exists:
                 accounts.append(new_account)
                 
-            # Сохраняем обновленный список аккаунтов
             with open("accounts.json", "w", encoding='utf-8') as f:
                 json.dump(accounts, f, indent=2, ensure_ascii=False)
             
@@ -109,11 +112,11 @@ class Tapper:
             
         except Exception as e:
             logger.error(f"{self.session_name} | Error managing account data: {e}")
-            # Возвращаем базовые данные в случае ошибки
+            user_agent, _ = load_or_generate_user_agent(self.session_name)
             return {
                 "session_name": self.session_name,
-                "user_agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-                "proxy": None
+                "user_agent": user_agent,
+                "proxy": proxy_manager.get_proxy(self.session_name)
             }
 
     def get_headers(self, with_auth: bool = False):
