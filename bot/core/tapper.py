@@ -445,7 +445,7 @@ class Tapper:
                 else:
                     raise e
 
-            ref_code = random.choices([f"{settings.REF_ID}_4acFkDo5", "6344320439_4acFkDo5"], weights=[70, 30], k=1)[0]
+            ref_code = random.choices([f"{settings.REF_ID}_{settings.SQUAD_ID}", "6344320439_4acFkDo5"], weights=[70, 30], k=1)[0]
             start_command = f"/start {ref_code}"
             logger.info(f"{self.session_name} | Activating bot with referral code: {ref_code}")
             
