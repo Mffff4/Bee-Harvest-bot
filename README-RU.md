@@ -2,9 +2,8 @@
 
 [🇷🇺 Русский](README-RU.md) | [🇬🇧 English](README.md)
 
-[![Bot Link](https://img.shields.io/badge/Telegram_Бот-Link-blue?style=for-the-badge&logo=Telegram&logoColor=white)](https://t.me/pawsbot/start?startapp=bro-228618799)
-[![Channel Link](https://img.shields.io/badge/Telegram_Канал-Link-blue?style=for-the-badge&logo=Telegram&logoColor=white)](https://t.me/+Ayp1HeUYsjdmZjgy)
-[![Channel Link](https://img.shields.io/badge/Сборник_ботов-Link-blue?style=for-the-badge&logo=Telegram&logoColor=white)](https://t.me/+uF4lQD9ZEUE4NGUy)
+[![Bot Link](https://img.shields.io/badge/Telegram_Бот-Link-blue?style=for-the-badge&logo=Telegram&logoColor=white)](https://t.me/beeharvestbot?start=6344320439_4acFkDo5)
+[![Channel Link](https://img.shields.io/badge/Telegram_Канал-Link-blue?style=for-the-badge&logo=Telegram&logoColor=white)](https://t.me/+uF4lQD9ZEUE4NGUy)
 
 ---
 
