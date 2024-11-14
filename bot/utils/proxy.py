@@ -45,10 +45,26 @@ class ProxyManager:
             
         try:
             proxy = Proxy.from_str(proxy_str)
-            proxy_url = f"{proxy.protocol}://"
-            if proxy.login and proxy.password:
-                proxy_url += f"{proxy.login}:{proxy.password}@"
-            proxy_url += f"{proxy.host}:{proxy.port}"
+            
+            # Для SOCKS прокси используем aiohttp_socks
+            if proxy.protocol.startswith('socks'):
+                from aiohttp_socks import ProxyType, ProxyConnector
+                proxy_type = ProxyType.SOCKS5 if proxy.protocol == 'socks5' else ProxyType.SOCKS4
+                connector = ProxyConnector(
+                    proxy_type=proxy_type,
+                    host=proxy.host,
+                    port=proxy.port,
+                    username=proxy.login if proxy.login else None,
+                    password=proxy.password if proxy.password else None,
+                    verify_ssl=False
+                )
+            else:
+                # Для HTTP/HTTPS прокси
+                proxy_url = f"{proxy.protocol}://"
+                if proxy.login and proxy.password:
+                    proxy_url += f"{proxy.login}:{proxy.password}@"
+                proxy_url += f"{proxy.host}:{proxy.port}"
+                connector = TCPConnector(verify_ssl=False)
 
             # Сначала пробуем через Telegram API
             try:
@@ -61,8 +77,8 @@ class ProxyManager:
                         scheme=proxy.protocol,
                         hostname=proxy.host,
                         port=proxy.port,
-                        username=proxy.login,
-                        password=proxy.password
+                        username=proxy.login if proxy.login else None,
+                        password=proxy.password if proxy.password else None
                     ),
                     in_memory=True
                 )
@@ -73,16 +89,19 @@ class ProxyManager:
             except Exception as e:
                 logger.debug(f"Telegram proxy check failed: {e}")
 
-            # Если Telegram проверка не прошла, пробуем через HTTP
-            connector = TCPConnector(verify_ssl=False)
+            # Проверка через HTTP запросы
             timeout = ClientTimeout(total=settings.PROXY_TIMEOUT)
             
-            async with ClientSession(connector=connector) as session:
+            if proxy.protocol.startswith('socks'):
+                session = ClientSession(connector=connector)
+            else:
+                session = ClientSession(connector=connector)
+                
+            async with session:
                 try:
-                    # Пробуем через google.com
                     async with session.get(
                         "http://www.google.com",
-                        proxy=proxy_url,
+                        proxy=None if proxy.protocol.startswith('socks') else proxy_url,
                         timeout=timeout,
                         ssl=False
                     ) as response:

@@ -66,23 +66,18 @@ global tg_clients
 shutdown_event = asyncio.Event()
 
 def get_session_files() -> list[str]:
-    """Получает список всех существующих сессий"""
     session_files = glob.glob("sessions/*.session")
     return [os.path.splitext(os.path.basename(file))[0] for file in session_files]
 
 def get_accounts_data() -> list[dict]:
-    """Получает данные аккаунтов из accounts.json и синхронизирует с реальными сессиями"""
     existing_sessions = set(get_session_files())
     try:
-        # Пытаемся загрузить существующий accounts.json
         with open("accounts.json", "r") as f:
             accounts = json.load(f)
             
-        # Фильтруем только существующие сессии
         valid_accounts = [acc for acc in accounts if acc["session_name"] in existing_sessions]
         existing_in_json = {acc["session_name"] for acc in valid_accounts}
         
-        # Добавляем новые сессии, которых нет в json
         for session_name in existing_sessions - existing_in_json:
             user_agent, _ = generate_user_agent()
             valid_accounts.append({
@@ -91,21 +86,18 @@ def get_accounts_data() -> list[dict]:
                 "proxy": None
             })
             
-        # Сохраняем обновленный список
         with open("accounts.json", "w") as f:
             json.dump(valid_accounts, f, indent=4)
             
         return valid_accounts
         
     except FileNotFoundError:
-        # Если файла нет, создаем новый
         return create_accounts_json()
     except json.JSONDecodeError:
         logger.error("Error parsing accounts.json")
         return create_accounts_json()
 
 def create_accounts_json():
-    """Создает accounts.json из существующих сессий"""
     session_names = get_session_files()
     if not session_names:
         return []
@@ -130,17 +122,18 @@ def create_accounts_json():
         return []
 
 def get_session_names() -> list[str]:
-    """Получает список имен сессий"""
-    return get_session_files()  # Теперь всегда берем реальные сессии
+    return get_session_files()
 
 def get_proxies() -> list[str | None]:
-    """Получает список прокси из accounts.json для существующих сессий"""
     if not settings.USE_PROXY_FROM_FILE:
         return []
     accounts = get_accounts_data()
     existing_sessions = get_session_files()
-    proxies = [account.get("proxy") for account in accounts 
-              if account["session_name"] in existing_sessions]
+    proxies = []
+    for session in existing_sessions:
+        account = next((acc for acc in accounts if acc["session_name"] == session), None)
+        if account:
+            proxies.append(account.get("proxy"))
     return [p for p in proxies if p is not None]
 
 async def get_tg_clients() -> list[Client]:
@@ -172,18 +165,15 @@ async def process() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("-a", "--action", type=int, help="Action to perform")
 
-    # Проверяем прокси только если их нет в accounts.json
     if settings.USE_PROXY_FROM_FILE:
         accounts = get_accounts_data()
-        # Проверяем, есть ли уже прокси в accounts.json
         existing_proxies = [account.get("proxy") for account in accounts if account.get("proxy")]
         
-        if not existing_proxies:  # Если прокси нет, только тогда инициализируем новые
+        if not existing_proxies:
             raw_proxies = proxy_manager.load_proxies()
             if raw_proxies:
                 updated_accounts = []
                 for account in accounts:
-                    # Берем прокси как есть, без валидации и проверки
                     proxy = raw_proxies[len(updated_accounts) % len(raw_proxies)]
                     account["proxy"] = proxy
                     updated_accounts.append(account)
