@@ -12,7 +12,7 @@ class Settings(BaseSettings):
     USE_PROXY_FROM_FILE: bool = False
     PROXY_TYPE: str = "socks5"
     PROXY_TIMEOUT: int = 30
-    ENABLE_WALLET_BINDING: bool = False
+    ENABLE_WALLET_BINDING: bool = True
     DELAY_BEFORE_START: list[int] = [1, 5]
     DELAY_BETWEEN_ACTIONS: list[int] = [1, 3]
     DELAY_BETWEEN_SPINS: list[int] = [6, 8]

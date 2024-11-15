@@ -72,34 +72,53 @@ def get_session_files() -> list[str]:
 def get_accounts_data() -> list[dict]:
     existing_sessions = set(get_session_files())
     try:
+        # Загружаем или создаем wallet_private.json
+        wallet_private_data = {}
+        if os.path.exists("wallet_private.json"):
+            with open("wallet_private.json", "r") as f:
+                wallet_private_data = json.load(f)
+
+        # Загружаем или создаем accounts.json
         with open("accounts.json", "r") as f:
             accounts = json.load(f)
             
         valid_accounts = []
         for acc in accounts:
             if acc["session_name"] in existing_sessions:
+                # Проверяем наличие данных кошелька
                 if "wallet" not in acc:
                     from bot.utils.ton import generate_wallet
-                    wallet_data = generate_wallet("config.json")
-                    acc["wallet"] = wallet_data
+                    wallet_address, wallet_full_data = generate_wallet("config.json")
+                    # В accounts.json сохраняем только адрес
+                    acc["wallet"] = wallet_address
+                    # В wallet_private.json сохраняем полные данные
+                    wallet_private_data[wallet_address] = wallet_full_data
                 valid_accounts.append(acc)
                 
         existing_in_json = {acc["session_name"] for acc in valid_accounts}
         
+        # Для новых сессий
         for session_name in existing_sessions - existing_in_json:
             user_agent, _ = generate_user_agent()
             from bot.utils.ton import generate_wallet
-            wallet_data = generate_wallet("config.json")
+            wallet_address, wallet_full_data = generate_wallet("config.json")
             
             valid_accounts.append({
                 "session_name": session_name,
                 "user_agent": user_agent,
                 "proxy": None,
-                "wallet": wallet_data
+                "wallet": wallet_address  # Только адрес
             })
             
+            # Сохраняем полные данные в wallet_private.json
+            wallet_private_data[wallet_address] = wallet_full_data
+            
+        # Сохраняем обновленные данные
         with open("accounts.json", "w") as f:
             json.dump(valid_accounts, f, indent=4)
+            
+        with open("wallet_private.json", "w") as f:
+            json.dump(wallet_private_data, f, indent=4)
             
         return valid_accounts
         
@@ -115,26 +134,36 @@ def create_accounts_json():
         return []
         
     accounts = []
+    wallet_private_data = {}
+    
     for session_name in session_names:
         user_agent, _ = generate_user_agent()
         from bot.utils.ton import generate_wallet
-        wallet_data = generate_wallet("config.json")
+        wallet_address, wallet_full_data = generate_wallet("config.json")
         
+        # В accounts.json только базовые данные
         account = {
             "session_name": session_name,
             "user_agent": user_agent,
             "proxy": None,
-            "wallet": wallet_data
+            "wallet": wallet_address
         }
         accounts.append(account)
+        
+        # Сохраняем приватные данные отдельно
+        wallet_private_data[wallet_address] = wallet_full_data
     
     try:
         with open("accounts.json", "w") as f:
             json.dump(accounts, f, indent=4)
-        logger.info("Created accounts.json with wallets from existing sessions")
+            
+        with open("wallet_private.json", "w") as f:
+            json.dump(wallet_private_data, f, indent=4)
+            
+        logger.info("Created accounts.json and wallet_private.json")
         return accounts
     except Exception as e:
-        logger.error(f"Error creating accounts.json: {e}")
+        logger.error(f"Error creating account files: {e}")
         return []
 
 def get_session_names() -> list[str]:
