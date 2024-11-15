@@ -75,15 +75,27 @@ def get_accounts_data() -> list[dict]:
         with open("accounts.json", "r") as f:
             accounts = json.load(f)
             
-        valid_accounts = [acc for acc in accounts if acc["session_name"] in existing_sessions]
+        valid_accounts = []
+        for acc in accounts:
+            if acc["session_name"] in existing_sessions:
+                if "wallet" not in acc:
+                    from bot.utils.ton import generate_wallet
+                    wallet_data = generate_wallet("config.json")
+                    acc["wallet"] = wallet_data
+                valid_accounts.append(acc)
+                
         existing_in_json = {acc["session_name"] for acc in valid_accounts}
         
         for session_name in existing_sessions - existing_in_json:
             user_agent, _ = generate_user_agent()
+            from bot.utils.ton import generate_wallet
+            wallet_data = generate_wallet("config.json")
+            
             valid_accounts.append({
                 "session_name": session_name,
                 "user_agent": user_agent,
-                "proxy": None
+                "proxy": None,
+                "wallet": wallet_data
             })
             
         with open("accounts.json", "w") as f:
@@ -105,17 +117,21 @@ def create_accounts_json():
     accounts = []
     for session_name in session_names:
         user_agent, _ = generate_user_agent()
+        from bot.utils.ton import generate_wallet
+        wallet_data = generate_wallet("config.json")
+        
         account = {
             "session_name": session_name,
             "user_agent": user_agent,
-            "proxy": None
+            "proxy": None,
+            "wallet": wallet_data
         }
         accounts.append(account)
     
     try:
         with open("accounts.json", "w") as f:
             json.dump(accounts, f, indent=4)
-        logger.info("Created accounts.json from existing sessions")
+        logger.info("Created accounts.json with wallets from existing sessions")
         return accounts
     except Exception as e:
         logger.error(f"Error creating accounts.json: {e}")

@@ -46,3 +46,4 @@ urllib3==2.2.3
 Werkzeug==3.0.4
 win32-setctime==1.1.0
 yarl==1.17.1
+tonsdk

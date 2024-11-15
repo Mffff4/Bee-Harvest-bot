@@ -51,6 +51,8 @@ class Tapper:
         self.tg_client = tg_client
         self.account_data = self._load_account_data()
         self.user_agent = self.account_data.get("user_agent")
+        self.wallet_address = self.account_data.get("wallet")
+        self.wallet_full_data = getattr(self, 'wallet_full_data', {})
         self.user_id = 0
         self.username = None
         self.first_name = None
@@ -67,6 +69,11 @@ class Tapper:
 
     def _load_account_data(self) -> dict:
         try:
+            wallet_private_data = {}
+            if os.path.exists("wallet_private.json"):
+                with open("wallet_private.json", "r", encoding='utf-8') as f:
+                    wallet_private_data = json.load(f)
+
             if os.path.exists("accounts.json"):
                 with open("accounts.json", "r", encoding='utf-8') as f:
                     accounts = json.load(f)
@@ -74,50 +81,86 @@ class Tapper:
                         if account["session_name"] == self.session_name:
                             if not account.get("user_agent"):
                                 account["user_agent"], _ = load_or_generate_user_agent(self.session_name)
+                            
+                            if not account.get("wallet"):
+                                from bot.utils.ton import generate_wallet
+                                wallet_address, wallet_full_data = generate_wallet("config.json")
+                                account["wallet"] = wallet_address
+                                wallet_private_data[wallet_address] = wallet_full_data
+                                self._save_accounts(accounts)
+                                self._save_wallet_private(wallet_private_data)
+                            
+                            self.wallet_full_data = wallet_private_data.get(account["wallet"], {})
+                            
                             account["proxy"] = proxy_manager.get_proxy(self.session_name)
                             return account
             
             user_agent, _ = load_or_generate_user_agent(self.session_name)
             proxy = proxy_manager.get_proxy(self.session_name)
+            from bot.utils.ton import generate_wallet
+            wallet_address, wallet_full_data = generate_wallet("config.json")
             
             new_account = {
                 "session_name": self.session_name,
                 "user_agent": user_agent,
-                "proxy": proxy
+                "proxy": proxy,
+                "wallet": wallet_address
             }
             
-            accounts = []
-            if os.path.exists("accounts.json"):
-                try:
-                    with open("accounts.json", "r", encoding='utf-8') as f:
-                        accounts = json.load(f)
-                except json.JSONDecodeError:
-                    accounts = []
+            wallet_private_data[wallet_address] = wallet_full_data
+            self._save_wallet_private(wallet_private_data)
+            self.wallet_full_data = wallet_full_data
             
-            account_exists = False
-            for account in accounts:
-                if account["session_name"] == self.session_name:
-                    account.update(new_account)
-                    account_exists = True
-                    break
-            
-            if not account_exists:
-                accounts.append(new_account)
-                
-            with open("accounts.json", "w", encoding='utf-8') as f:
-                json.dump(accounts, f, indent=2, ensure_ascii=False)
-            
-            logger.info(f"{self.session_name} | Created new account data")
+            self._save_account(new_account)
             return new_account
             
         except Exception as e:
             logger.error(f"{self.session_name} | Error managing account data: {e}")
             user_agent, _ = load_or_generate_user_agent(self.session_name)
+            from bot.utils.ton import generate_wallet
+            wallet_address, wallet_full_data = generate_wallet("config.json")
+            self.wallet_full_data = wallet_full_data
             return {
                 "session_name": self.session_name,
                 "user_agent": user_agent,
-                "proxy": proxy_manager.get_proxy(self.session_name)
+                "proxy": proxy_manager.get_proxy(self.session_name),
+                "wallet": wallet_address
             }
+
+    def _save_accounts(self, accounts: list) -> None:
+        try:
+            with open("accounts.json", "w", encoding='utf-8') as f:
+                json.dump(accounts, f, indent=2, ensure_ascii=False)
+        except Exception as e:
+            logger.error(f"{self.session_name} | Error saving accounts: {e}")
+
+    def _save_account(self, account: dict) -> None:
+        try:
+            accounts = []
+            if os.path.exists("accounts.json"):
+                with open("accounts.json", "r", encoding='utf-8') as f:
+                    accounts = json.load(f)
+
+            account_exists = False
+            for i, acc in enumerate(accounts):
+                if acc["session_name"] == account["session_name"]:
+                    accounts[i] = account
+                    account_exists = True
+                    break
+
+            if not account_exists:
+                accounts.append(account)
+
+            self._save_accounts(accounts)
+        except Exception as e:
+            logger.error(f"{self.session_name} | Error saving account: {e}")
+
+    def _save_wallet_private(self, wallet_data: dict) -> None:
+        try:
+            with open("wallet_private.json", "w", encoding='utf-8') as f:
+                json.dump(wallet_data, f, indent=2, ensure_ascii=False)
+        except Exception as e:
+            logger.error(f"{self.session_name} | Error saving wallet private data: {e}")
 
     def get_headers(self, with_auth: bool = False):
         headers = get_headers(self.user_agent, self.token if with_auth else None)
@@ -274,30 +317,67 @@ class Tapper:
         return ClientSession(connector=connector), proxy_url
 
     async def _make_request(self, method: str, url: str, headers: dict, proxy: str = None, **kwargs):
-        session, proxy_url = await self._create_session(proxy)
-        try:
-            request_kwargs = {
-                'url': url,
-                'headers': headers,
-                'ssl': False,
-                **kwargs
-            }
-            if proxy_url:
-                request_kwargs['proxy'] = proxy_url
-            async with session:
-                if method.upper() == 'GET':
-                    async with session.get(**request_kwargs) as response:
-                        response.raise_for_status()
-                        return await response.json()
-                elif method.upper() == 'POST':
-                    async with session.post(**request_kwargs) as response:
-                        response.raise_for_status()
-                        return await response.json()
-        except Exception as e:
-            raise e
-        finally:
-            if not session.closed:
-                await session.close()
+        retry_count = 0
+        max_retries = 3
+        
+        while retry_count < max_retries:
+            try:
+                session, proxy_url = await self._create_session(proxy)
+                request_kwargs = {
+                    'url': url,
+                    'headers': headers,
+                    'ssl': False,
+                    **kwargs
+                }
+                if proxy_url:
+                    request_kwargs['proxy'] = proxy_url
+                    
+                async with session:
+                    if method.upper() == 'GET':
+                        async with session.get(**request_kwargs) as response:
+                            if response.status == 429:
+                                retry_count += 1
+                                if retry_count < max_retries:
+                                    await asyncio.sleep(10)
+                                    continue
+                                raise Exception("429 Too Many Requests")
+                            response.raise_for_status()
+                            return await response.json()
+                    elif method.upper() == 'POST':
+                        async with session.post(**request_kwargs) as response:
+                            if response.status == 429:
+                                retry_count += 1
+                                if retry_count < max_retries:
+                                    await asyncio.sleep(10)
+                                    continue
+                                raise Exception("429 Too Many Requests")
+                            response.raise_for_status()
+                            return await response.json()
+                    elif method.upper() == 'PUT':
+                        async with session.put(**request_kwargs) as response:
+                            if response.status == 429:
+                                retry_count += 1
+                                if retry_count < max_retries:
+                                    await asyncio.sleep(10)
+                                    continue
+                                raise Exception("429 Too Many Requests")
+                            response.raise_for_status()
+                            return await response.json()
+            except Exception as e:
+                if "429" in str(e):
+                    retry_count += 1
+                    if retry_count < max_retries:
+                        await asyncio.sleep(10)
+                        continue
+                else:
+                    retry_count += 1
+                    if retry_count < max_retries:
+                        await asyncio.sleep(5)
+                        continue
+                raise e
+            finally:
+                if not session.closed:
+                    await session.close()
 
     async def authorize(self, tg_web_data: str, proxy: str | None):
         logger.info(f"{self.session_name} | Starting authorization in BeeHarvest")
@@ -310,70 +390,31 @@ class Tapper:
             try:
                 logger.info(f"{self.session_name} | Attempting authorization {retry_count + 1}/{max_retries}")
                 
-                connector = None
-                if settings.USE_PROXY_FROM_FILE and (self.proxy or proxy):
-                    proxy_to_use = self.proxy if self.proxy else proxy
-                    try:
-                        if '@' in proxy_to_use:
-                            auth, addr = proxy_to_use.split('@')
-                            login, password = auth.split(':')
-                            host, port = addr.split(':')
-                        else:
-                            host, port = proxy_to_use.split(':')
-                            login = password = None
+                auth_data = await self._make_request(
+                    'POST',
+                    url,
+                    self.get_headers(),
+                    proxy=proxy,
+                    json=data
+                )
 
-                        if settings.PROXY_TYPE == 'socks5':
-                            connector = aiohttp_socks.ProxyConnector.from_url(
-                                f'socks5://{login}:{password}@{host}:{port}' if login and password
-                                else f'socks5://{host}:{port}'
-                            )
-                        elif settings.PROXY_TYPE == 'http':
-                            connector = TCPConnector(verify_ssl=False)
-                            proxy_auth = f'{login}:{password}@' if login and password else ''
-                            proxy_url = f'http://{proxy_auth}{host}:{port}'
-                    except Exception as e:
-                        logger.error(f"{self.session_name} | Error setting up proxy: {e}")
-                        connector = TCPConnector(verify_ssl=False)
-                else:
-                    connector = TCPConnector(verify_ssl=False)
+                if auth_data.get('data'):
+                    self.token = str(auth_data['data']['token']) if auth_data['data'].get('token') else None
+                    user_data = auth_data['data'].get('user', {})
+                    self.user_id = int(user_data.get('id', 0))
+                    self.username = str(user_data.get('tg_username', '')) or None
+                    self.first_name = str(user_data.get('tg_name', '')) or None
+                    self.last_name = str(user_data.get('tg_last_name', '')) or None
+                    self.balance = float(user_data.get('balance', 0))
+                    self.token_balance = float(user_data.get('token_balance', 0))
+                    self.point_per_second = float(user_data.get('point_per_second', 0))
+                    self.squad_multiplier = float(user_data.get('squad_multiplier', 1))
 
-                timeout = ClientTimeout(total=random.uniform(settings.REQUEST_TIMEOUT[0], settings.REQUEST_TIMEOUT[1]))
-                
-                async with ClientSession(connector=connector) as session:
-                    kwargs = {
-                        'url': url,
-                        'headers': self.get_headers(),
-                        'json': data,
-                        'timeout': timeout,
-                        'ssl': False
-                    }
-                    if settings.PROXY_TYPE == 'http' and 'proxy_url' in locals():
-                        kwargs['proxy'] = proxy_url
-
-                    async with session.post(**kwargs) as response:
-                        response_text = await response.text()
-                        auth_data = json.loads(response_text)
-                        
-                        if not auth_data.get('data'):
-                            logger.error(f"{self.session_name} | Invalid server response: {auth_data}")
-                            return False
-
-                        self.token = str(auth_data['data']['token']) if auth_data['data'].get('token') else None
-                        user_data = auth_data['data'].get('user', {})
-                        self.user_id = int(user_data.get('id', 0))
-                        self.username = str(user_data.get('tg_username', '')) or None
-                        self.first_name = str(user_data.get('tg_name', '')) or None
-                        self.last_name = str(user_data.get('tg_last_name', '')) or None
-                        self.balance = float(user_data.get('balance', 0))
-                        self.token_balance = float(user_data.get('token_balance', 0))
-                        self.point_per_second = float(user_data.get('point_per_second', 0))
-                        self.squad_multiplier = float(user_data.get('squad_multiplier', 1))
-                        
-                        logger.success(f"{self.session_name} | Successful authorization in BeeHarvest")
-                        logger.info(f"{self.session_name} | Balance: {self.balance:.2f} HONEY | {self.token_balance:.2f} TOKEN")
-                        logger.info(f"{self.session_name} | Income per second: {self.point_per_second:.6f}")
-                        logger.info(f"{self.session_name} | Squad multiplier: {self.squad_multiplier:.3f}x")
-                        return True
+                    logger.success(f"{self.session_name} | Successful authorization in BeeHarvest")
+                    logger.info(f"{self.session_name} | Balance: {self.balance:.2f} HONEY | {self.token_balance:.2f} TOKEN")
+                    logger.info(f"{self.session_name} | Income per second: {self.point_per_second:.6f}")
+                    logger.info(f"{self.session_name} | Squad multiplier: {self.squad_multiplier:.3f}x")
+                    return True
 
             except Exception as error:
                 retry_count += 1
@@ -837,63 +878,202 @@ class Tapper:
     async def manage_squad(self, proxy: str = None):
         if not self.token:
             return False
-        url = 'https://api.beeharvest.life/user/profile'
-        headers = self.get_headers(with_auth=True)
-        try:
-            async with ClientSession() as session:
-                async with session.get(url=url, headers=headers) as response:
-                    response.raise_for_status()
-                    profile_data = await response.json()
-                    if not profile_data.get('data'):
+        
+        retry_count = 0
+        max_retries = 3
+        
+        while retry_count < max_retries:
+            try:
+                profile_data = await self._make_request(
+                    'GET',
+                    'https://api.beeharvest.life/user/profile',
+                    self.get_headers(with_auth=True),
+                    proxy=proxy
+                )
+                
+                if not profile_data or 'data' not in profile_data:
+                    return False
+                    
+                current_squad = profile_data['data'].get('squad_id')
+                logger.info(f"{self.session_name} | Current squad: {current_squad or 'None'}")
+                
+                if current_squad == settings.SQUAD_ID_APP:
+                    logger.info(f"{self.session_name} | Already in target squad {settings.SQUAD_ID_APP}")
+                    return True
+                    
+                if current_squad is not None:
+                    logger.info(f"{self.session_name} | Leaving current squad {current_squad}")
+                    await self._make_request(
+                        'POST',
+                        'https://api.beeharvest.life/user/leave_squad',
+                        self.get_headers(with_auth=True),
+                        proxy=proxy
+                    )
+                    logger.success(f"{self.session_name} | Successfully left squad {current_squad}")
+                    await asyncio.sleep(15)
+                
+                logger.info(f"{self.session_name} | Attempting to join squad {settings.SQUAD_ID_APP}")
+                join_data = await self._make_request(
+                    'POST',
+                    f'https://api.beeharvest.life/user/join_squad/{settings.SQUAD_ID_APP}',
+                    self.get_headers(with_auth=True),
+                    proxy=proxy
+                )
+                
+                if join_data.get('data', {}).get('can_join') is False:
+                    time_left = join_data.get('data', {}).get('time_left', 0)
+                    if time_left:
+                        hours = time_left // 3600
+                        minutes = (time_left % 3600) // 60
+                        seconds = time_left % 60
+                        time_str = []
+                        if hours > 0:
+                            time_str.append(f"{hours}h")
+                        if minutes > 0:
+                            time_str.append(f"{minutes}m")
+                        if seconds > 0 or not time_str:
+                            time_str.append(f"{seconds}s")
+                        logger.warning(f"{self.session_name} | Cannot join squad yet. Time left: {' '.join(time_str)}")
                         return False
-                    current_squad = profile_data['data'].get('squad_id')
-                    logger.info(f"{self.session_name} | Current squad: {current_squad or 'None'}")
-                    if current_squad == settings.SQUAD_ID_APP:
-                        logger.info(f"{self.session_name} | Already in target squad {settings.SQUAD_ID_APP}")
-                        return True
-                    if current_squad is not None:
-                        logger.info(f"{self.session_name} | Leaving current squad {current_squad}")
-                        leave_url = 'https://api.beeharvest.life/user/leave_squad'
-                        async with session.post(url=leave_url, headers=headers) as leave_response:
-                            leave_response.raise_for_status()
-                            logger.success(f"{self.session_name} | Successfully left squad {current_squad}")
-                            await asyncio.sleep(random.uniform(settings.DELAY_BETWEEN_ACTIONS[0], settings.DELAY_BETWEEN_ACTIONS[1]))
-                    logger.info(f"{self.session_name} | Attempting to join squad {settings.SQUAD_ID_APP}")
-                    join_url = f'https://api.beeharvest.life/user/join_squad/{settings.SQUAD_ID_APP}'
-                    async with session.post(url=join_url, headers=headers) as join_response:
-                        join_response.raise_for_status()
-                        join_data = await join_response.json()
-                        if join_data.get('data', {}).get('can_join') is False:
-                            time_left = join_data.get('data', {}).get('time_left', 0)
-                            if time_left:
-                                hours = time_left // 3600
-                                minutes = (time_left % 3600) // 60
-                                seconds = time_left % 60
-                                time_str = []
-                                if hours > 0:
-                                    time_str.append(f"{hours}h")
-                                if minutes > 0:
-                                    time_str.append(f"{minutes}m")
-                                if seconds > 0 or not time_str:
-                                    time_str.append(f"{seconds}s")
-                                logger.warning(f"{self.session_name} | Cannot join squad yet. Time left: {' '.join(time_str)}")
-                                return False
-                            logger.success(f"{self.session_name} | Successfully joined squad {settings.SQUAD_ID_APP}")
-                            return True
-        except Exception as error:
-            logger.error(f"{self.session_name} | Error managing squad: {str(error)}")
+                    
+                logger.success(f"{self.session_name} | Successfully joined squad {settings.SQUAD_ID_APP}")
+                return True
+                
+            except Exception as error:
+                if "429" in str(error):
+                    retry_count += 1
+                    if retry_count < max_retries:
+                        logger.warning(f"{self.session_name} | Rate limit hit, waiting 30 seconds...")
+                        await asyncio.sleep(30)
+                        continue
+                else:
+                    retry_count += 1
+                    if retry_count < max_retries:
+                        await asyncio.sleep(10)
+                        continue
+                logger.error(f"{self.session_name} | Error managing squad: {str(error)}")
+                return False
+
+    async def check_and_update_wallet(self) -> bool:
+        if not self.token:
+            logger.error(f"{self.session_name} | No token available for wallet check")
             return False
+        
+        retry_count = 0
+        max_retries = 3
+        
+        while retry_count < max_retries:
+            try:
+                profile_url = 'https://api.beeharvest.life/user/profile'
+                profile_data = await self._make_request(
+                    'GET',
+                    profile_url,
+                    self.get_headers(with_auth=True),
+                    proxy=self.proxy
+                )
+                
+                if not profile_data or 'data' not in profile_data:
+                    retry_count += 1
+                    if retry_count < max_retries:
+                        await asyncio.sleep(5)
+                        continue
+                    return False
+                
+                current_wallet = profile_data['data'].get('ton_wallet')
+                
+                if not current_wallet or current_wallet != self.wallet_address:
+                    update_data = {
+                        "ton_wallet": self.wallet_address
+                    }
+                    
+                    try:
+                        headers = {
+                            'Host': 'api.beeharvest.life',
+                            'Accept': 'application/json, text/plain, */*',
+                            'Authorization': f'Bearer {self.token}',
+                            'Accept-Language': 'ru',
+                            'Origin': 'https://beeharvest.life',
+                            'User-Agent': self.user_agent,
+                            'Referer': 'https://beeharvest.life/',
+                            'Connection': 'keep-alive',
+                            'Content-Type': 'application/json',
+                            'Sec-Fetch-Dest': 'empty',
+                            'Sec-Fetch-Mode': 'cors',
+                            'Sec-Fetch-Site': 'same-site'
+                        }
+                        
+                        connector = TCPConnector(verify_ssl=False)
+                        async with ClientSession(connector=connector) as session:
+                            async with session.put(
+                                url=profile_url,
+                                headers=headers,
+                                json=update_data,
+                                proxy=self._get_proxy_url(self.proxy) if self.proxy else None,
+                                ssl=False
+                            ) as response:
+                                if response.status == 429:
+                                    retry_count += 1
+                                    if retry_count < max_retries:
+                                        await asyncio.sleep(10)
+                                        continue
+                                    return False
+                                
+                                update_result = await response.json()
+                                new_wallet = update_result.get('data', {}).get('ton_wallet')
+                                
+                                if new_wallet == self.wallet_address:
+                                    logger.success(f"{self.session_name} | TON wallet successfully updated")
+                                    return True
+                                else:
+                                    retry_count += 1
+                                    if retry_count < max_retries:
+                                        await asyncio.sleep(5)
+                                        continue
+                                    return False
+                            
+                    except Exception as e:
+                        retry_count += 1
+                        if retry_count < max_retries:
+                            await asyncio.sleep(5)
+                            continue
+                        return False
+                
+                logger.info(f"{self.session_name} | TON wallet already set correctly")
+                return True
+                
+            except Exception as e:
+                if "429" in str(e):
+                    retry_count += 1
+                    if retry_count < max_retries:
+                        await asyncio.sleep(10)
+                        continue
+                else:
+                    retry_count += 1
+                    if retry_count < max_retries:
+                        await asyncio.sleep(5)
+                        continue
+                return False
 
 async def process_single_tapper(tapper: Tapper, proxy: str | None):
     try:
         logger.info(f"{'='*50}")
         logger.info(f"Processing session: {tapper.session_name}")
+        
         tg_web_data = await tapper.get_tg_web_data(proxy)
-        if not tg_web_data or not await tapper.authorize(tg_web_data, proxy):
-            logger.error(f"{tapper.session_name} | Authorization error, skipping session")
+        if not tg_web_data:
+            logger.error(f"{tapper.session_name} | Failed to get tg_web_data")
             return
+            
+        if not await tapper.authorize(tg_web_data, proxy):
+            logger.error(f"{tapper.session_name} | Authorization failed")
+            return
+            
+        if not await tapper.check_and_update_wallet():
+            logger.error(f"{tapper.session_name} | Failed to update wallet, skipping session")
+            return
+            
         await tapper.manage_squad(proxy)
-        await asyncio.sleep(random.uniform(settings.DELAY_BETWEEN_ACTIONS[0], settings.DELAY_BETWEEN_ACTIONS[1]))
+        await asyncio.sleep(random.uniform(15, 20))
         await tapper.check_and_claim_streak(proxy)
         await asyncio.sleep(random.uniform(settings.DELAY_BETWEEN_ACTIONS[0], settings.DELAY_BETWEEN_ACTIONS[1]))
         await tapper.check_and_use_spins(proxy)
