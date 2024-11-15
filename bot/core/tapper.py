@@ -1068,9 +1068,12 @@ async def process_single_tapper(tapper: Tapper, proxy: str | None):
             logger.error(f"{tapper.session_name} | Authorization failed")
             return
             
-        if not await tapper.check_and_update_wallet():
-            logger.error(f"{tapper.session_name} | Failed to update wallet, skipping session")
-            return
+        if settings.ENABLE_WALLET_BINDING:
+            if not await tapper.check_and_update_wallet():
+                logger.error(f"{tapper.session_name} | Failed to update wallet, skipping session")
+                return
+        else:
+            logger.info(f"{tapper.session_name} | Wallet binding disabled in settings")
             
         await tapper.manage_squad(proxy)
         await asyncio.sleep(random.uniform(15, 20))

@@ -105,6 +105,7 @@ SQUAD_ID = 4acFkDo5​​​​​​​​​​​​​​​​
 | **SQUAD_ID**              |                  | Target squad ID                                               |
 | **SQUAD_ID_APP**          |                  | Target squad ID in app                                       |
 | **USE_PROXY_FROM_FILE**   | False                | Use proxies from proxies.txt file                             |
+| **ENABLE_WALLET_BINDING**  | False               | Enable wallet binding                                    |
 | **MULTITHREADING**        | False                | Enable multithreading mode                                    |
 | **DELAY_BEFORE_START**    | [1, 5]               | Delay before session start (sec)                              |
 | **DELAY_BETWEEN_ACTIONS** | [1, 3]               | Delay between actions (sec)                                   |
@@ -163,7 +164,7 @@ Support development using cryptocurrencies:
 ## 📞 Contact
 
 If you have questions or suggestions:
-- **Telegram**: [Join our channel](https://t.me/+ap1Yd23CiuVkOTEy)
+- **Telegram**: [Join our channel](https://t.me/+uF4lQD9ZEUE4NGUy)
 
 ---
 
