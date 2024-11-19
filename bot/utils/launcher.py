@@ -56,6 +56,7 @@ start_text = f"""
     {Fore.GREEN}3. Launch clicker{Style.RESET_ALL}
     {Fore.GREEN}4. Launch via Telegram (Beta){Style.RESET_ALL}
     {Fore.GREEN}5. Upload sessions via web (BETA){Style.RESET_ALL}
+    {Fore.GREEN}6. Check sessions for ban{Style.RESET_ALL}
 
 {Fore.CYAN}Developed by: @Mffff4{Style.RESET_ALL}
 {Fore.CYAN}Our Telegram channel: {Fore.BLUE}https://t.me/+l3roJWT9aRNkMjUy{Style.RESET_ALL}
@@ -72,32 +73,26 @@ def get_session_files() -> list[str]:
 def get_accounts_data() -> list[dict]:
     existing_sessions = set(get_session_files())
     try:
-        # Загружаем или создаем wallet_private.json
         wallet_private_data = {}
         if os.path.exists("wallet_private.json"):
             with open("wallet_private.json", "r") as f:
                 wallet_private_data = json.load(f)
 
-        # Загружаем или создаем accounts.json
         with open("accounts.json", "r") as f:
             accounts = json.load(f)
             
         valid_accounts = []
         for acc in accounts:
             if acc["session_name"] in existing_sessions:
-                # Проверяем наличие данных кошелька
                 if "wallet" not in acc:
                     from bot.utils.ton import generate_wallet
                     wallet_address, wallet_full_data = generate_wallet("config.json")
-                    # В accounts.json сохраняем только адрес
                     acc["wallet"] = wallet_address
-                    # В wallet_private.json сохраняем полные данные
                     wallet_private_data[wallet_address] = wallet_full_data
                 valid_accounts.append(acc)
                 
         existing_in_json = {acc["session_name"] for acc in valid_accounts}
         
-        # Для новых сессий
         for session_name in existing_sessions - existing_in_json:
             user_agent, _ = generate_user_agent()
             from bot.utils.ton import generate_wallet
@@ -107,13 +102,11 @@ def get_accounts_data() -> list[dict]:
                 "session_name": session_name,
                 "user_agent": user_agent,
                 "proxy": None,
-                "wallet": wallet_address  # Только адрес
+                "wallet": wallet_address
             })
             
-            # Сохраняем полные данные в wallet_private.json
             wallet_private_data[wallet_address] = wallet_full_data
             
-        # Сохраняем обновленные данные
         with open("accounts.json", "w") as f:
             json.dump(valid_accounts, f, indent=4)
             
@@ -141,7 +134,6 @@ def create_accounts_json():
         from bot.utils.ton import generate_wallet
         wallet_address, wallet_full_data = generate_wallet("config.json")
         
-        # В accounts.json только базовые данные
         account = {
             "session_name": session_name,
             "user_agent": user_agent,
@@ -150,7 +142,6 @@ def create_accounts_json():
         }
         accounts.append(account)
         
-        # Сохраняем приватные данные отдельно
         wallet_private_data[wallet_address] = wallet_full_data
     
     try:
@@ -206,36 +197,49 @@ async def get_tg_clients() -> list[Client]:
 
     return tg_clients
 
+async def validate_sessions(sessions: list[str]) -> tuple[list[str], list[str]]:
+    from bot.core import Tapper
+    
+    valid_sessions = []
+    invalid_sessions = []
+    
+    for session_name in sessions:
+        try:
+            client = Client(
+                name=session_name,
+                api_id=settings.API_ID,
+                api_hash=settings.API_HASH,
+                workdir="sessions/"
+            )
+            
+            tapper = Tapper(client)
+            tg_web_data = await tapper.get_tg_web_data(None)
+            
+            if not tg_web_data:
+                logger.warning(f"Session {session_name} failed to get tg_web_data")
+                continue
+                
+            url = 'https://api.beeharvest.life/auth/validate'
+            data = {'hash': str(tg_web_data)}
+            
+            async with ClientSession() as session:
+                async with session.post(url=url, headers=tapper.get_headers(), json=data) as response:
+                    if response.status == 403:
+                        invalid_sessions.append(session_name)
+                        logger.error(f"Session {session_name} got 403 Forbidden error")
+                    else:
+                        valid_sessions.append(session_name)
+                        logger.success(f"Session {session_name} is valid")
+                        
+        except Exception as e:
+            logger.error(f"Error validating session {session_name}: {str(e)}")
+            invalid_sessions.append(session_name)
+            
+    return valid_sessions, invalid_sessions
+
 async def process() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("-a", "--action", type=int, help="Action to perform")
-
-    if settings.USE_PROXY_FROM_FILE:
-        accounts = get_accounts_data()
-        existing_proxies = [account.get("proxy") for account in accounts if account.get("proxy")]
-        
-        if not existing_proxies:
-            raw_proxies = proxy_manager.load_proxies()
-            if raw_proxies:
-                updated_accounts = []
-                for account in accounts:
-                    proxy = raw_proxies[len(updated_accounts) % len(raw_proxies)]
-                    account["proxy"] = proxy
-                    updated_accounts.append(account)
-                    logger.info(f"Assigned proxy to {account['session_name']}")
-
-                try:
-                    with open("accounts.json", "w") as f:
-                        json.dump(updated_accounts, f, indent=4)
-                    logger.info("Updated accounts.json with proxy assignments")
-                except Exception as e:
-                    logger.error(f"Error updating accounts.json: {e}")
-            else:
-                logger.warning("No proxies available, continuing without proxies")
-        else:
-            logger.info("Using existing proxy assignments from accounts.json")
-
-    logger.info(f"Detected {len(get_session_names())} sessions | {len(get_proxies())} proxies")
 
     action = parser.parse_args().action
 
@@ -247,8 +251,8 @@ async def process() -> None:
 
             if not action.isdigit():
                 logger.warning("Action must be a number")
-            elif action not in ["1", "2", "3", "4", "5"]:
-                logger.warning("Action must be 1, 2, 3, 4, or 5")
+            elif action not in ["1", "2", "3", "4", "5", "6"]:
+                logger.warning("Action must be 1, 2, 3, 4, 5, or 6")
             else:
                 action = int(action)
                 break
@@ -263,35 +267,19 @@ async def process() -> None:
     elif action == 3:
         tg_clients = await get_tg_clients()
         if not tg_clients:
-            print("No sessions found. You can create sessions using the following methods:")
-            print("1. By phone number: python main.py -a 1")
-            print("2. By QR code: python main.py -a 2")
-            print("3. Upload via web interface (BETA): python main.py -a 5")
-            print("\nIf you're using Docker, use these commands:")
-            print("1. By phone number: docker compose run bot python3 main.py -a 1")
-            print("2. By QR code: docker compose run bot python3 main.py -a 2")
-            print("3. Upload via web interface (BETA): docker compose run bot python3 main.py -a 5")
+            print("No sessions found...")
             return
         await run_tasks(tg_clients=tg_clients)
     elif action == 4:
         tg_clients = await get_tg_clients()
         if not tg_clients:
-            print("No sessions found. You can create sessions using the following methods:")
-            print("1. By phone number: python main.py -a 1")
-            print("2. By QR code: python main.py -a 2")
-            print("3. Upload via web interface (BETA): python main.py -a 5")
-            print("\nIf you're using Docker, use these commands:")
-            print("1. By phone number: docker compose run bot python3 main.py -a 1")
-            print("2. By QR code: docker compose run bot python3 main.py -a 2")
-            print("3. Upload via web interface (BETA): docker compose run bot python3 main.py -a 5")
+            print("No sessions found...")
             return
         logger.info("Send /help command in Saved Messages\n")
         await compose(tg_clients)
     elif action == 5:
         logger.info("Starting web interface for uploading sessions...")
-        
         signal.signal(signal.SIGINT, signal_handler)
-        
         try:
             web_task = asyncio.create_task(run_web_and_tunnel())
             await shutdown_event.wait()
@@ -299,6 +287,29 @@ async def process() -> None:
             web_task.cancel()
             await stop_web_and_tunnel()
             print("Program terminated.")
+    elif action == 6:
+        session_names = get_session_names()
+        if not session_names:
+            logger.warning("No sessions found to validate")
+            return
+            
+        logger.info("Validating sessions...")
+        valid_sessions, invalid_sessions = await validate_sessions(session_names)
+        
+        if invalid_sessions:
+            logger.warning(f"Found {len(invalid_sessions)} invalid sessions:")
+            for session in invalid_sessions:
+                logger.warning(f"- {session}")
+            
+            if input("\nDo you want to delete invalid sessions? (y/n): ").lower() == 'y':
+                for session in invalid_sessions:
+                    try:
+                        os.remove(f"sessions/{session}.session")
+                        logger.success(f"Deleted session {session}")
+                    except Exception as e:
+                        logger.error(f"Error deleting session {session}: {str(e)}")
+        else:
+            logger.success("All sessions are valid!")
 
 async def run_tasks(tg_clients: list[Client]):
     proxies = get_proxies()
