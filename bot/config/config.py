@@ -37,6 +37,8 @@ class Settings(BaseSettings):
 
     COMBO_FILE: str = "combo.json"
     COMBO_ITEMS_COUNT: int = 4
+    COMBO_MANUAL_MODE: bool = True
+    COMBO_SKIP_IF_NO_SOLUTION: bool = True
 
     MIN_POOL_AMOUNT: float = 1.0
     POOL_RESERVE: float = 500.0

@@ -106,6 +106,8 @@ SQUAD_ID = 4acFkDo5
 | **USE_PROXY_FROM_FILE**    | False                | Использовать прокси из файла proxies.txt                    |
 | **ENABLE_WALLET_BINDING**  | False               | Включить привязку кошелька                                    |
 | **MULTITHREADING**         | False                | Включить многопоточный режим                                |
+| **COMBO_MANUAL_MODE**      | True               | Включить ручной режим комбо                                |
+| **COMBO_SKIP_IF_NO_SOLUTION** | True               | Пропускать комбо, если нет решения                            |
 | **DELAY_BEFORE_START**     | [1, 5]               | Задержка перед стартом сессии (сек)                         |
 | **DELAY_BETWEEN_ACTIONS**  | [1, 3]               | Задержка между действиями (сек)                             |
 | **DELAY_BETWEEN_SPINS**    | [6, 8]               | Задержка между спинами (сек)                                |

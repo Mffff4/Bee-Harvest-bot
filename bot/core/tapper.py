@@ -601,78 +601,59 @@ class Tapper:
         return False
 
     async def check_and_solve_combo(self, proxy: str = None):
+        """Проверяет и решает комбо с учетом ручного режима"""
         if not self.token:
             return False
+        
         try:
             url = 'https://api.beeharvest.life/combo_game/current'
             headers = self.get_headers(with_auth=True)
-            connector = TCPConnector(verify_ssl=False)
-            async with ClientSession(connector=connector) as session:
+            
+            async with ClientSession(connector=TCPConnector(verify_ssl=False)) as session:
                 async with session.get(url=url, headers=headers) as response:
-                    response.raise_for_status()
                     combo_data = await response.json()
+                    
                     if not combo_data.get('data'):
                         logger.error(f"{self.session_name} | Error getting combo data")
                         return False
-                today = datetime.now().strftime('%Y-%m-%d')
-                combo_file = settings.COMBO_FILE
-                saved_combos = {}
-                if combo_data['data'].get('correct'):
-                    correct_combo = combo_data['data']['correct']
+
+                    # Если комбо уже решено
+                    if combo_data['data'].get('selections') is not None:
+                        logger.info(f"{self.session_name} | Combo already solved")
+                        return True
+
+                    today = datetime.now().strftime('%Y-%m-%d')
+                    combo_file = settings.COMBO_FILE
+                    saved_combos = {}
+
                     try:
                         if os.path.exists(combo_file):
                             with open(combo_file, 'r') as f:
                                 saved_combos = json.load(f)
-                            if (today in saved_combos and saved_combos[today].get('correct') == correct_combo):
-                                logger.info(f"{self.session_name} | Combo already saved in file")
-                                return True
                     except Exception as e:
                         logger.error(f"{self.session_name} | Error reading combo file: {e}")
-                    logger.success(f"{self.session_name} | Got correct combo from response: {correct_combo}")
-                    saved_combos[today] = {'correct': correct_combo, 'max_reward': combo_data['data'].get('max_reward', '0'), 'updated_at': datetime.now().strftime('%Y-%m-%d %H:%M:%S')}
-                    try:
-                        with open(combo_file, 'w') as f:
-                            json.dump(saved_combos, f, indent=2)
-                        logger.success(f"{self.session_name} | Saved combo to file")
-                    except Exception as e:
-                        logger.error(f"{self.session_name} | Error saving combo file: {e}")
+
+                    # Проверяем есть ли сохраненное решение на сегодня
+                    if today in saved_combos:
+                        correct_combo = saved_combos[today]
+                        logger.info(f"{self.session_name} | Using saved combo: {correct_combo}")
+                        
+                        check_url = 'https://api.beeharvest.life/combo_game/check_combo'
+                        async with session.post(url=check_url, headers=headers, json={"itemIds": correct_combo}) as check_response:
+                            result = await check_response.json()
+                            correct_matching = result.get('correctMatching', 0)
+                            bonus_amount = float(result.get('bonusAmount', 0))
+                            
+                            if bonus_amount > 0:
+                                logger.success(f"{self.session_name} | Combo solved! Matched {correct_matching}/4 items, Reward: {bonus_amount:.2f} HONEY")
+                            else:
+                                logger.info(f"{self.session_name} | Combo didn't win. Matched {correct_matching}/4 items")
+                            return True
+
+                    # Если нет сохраненного решения - пропускаем
+                    logger.info(f"{self.session_name} | No saved combo solution for today, skipping")
                     return True
-                if combo_data['data'].get('selections') is not None:
-                    logger.info(f"{self.session_name} | Combo already solved")
-                    return True
-                try:
-                    if os.path.exists(combo_file):
-                        with open(combo_file, 'r') as f:
-                            saved_combos = json.load(f)
-                except Exception as e:
-                    logger.error(f"{self.session_name} | Error reading combo file: {e}")
-                if today in saved_combos and saved_combos[today].get('correct'):
-                    correct_combo = saved_combos[today]['correct']
-                    logger.info(f"{self.session_name} | Using saved combo: {correct_combo}")
-                    check_url = 'https://api.beeharvest.life/combo_game/check_combo'
-                    async with session.post(url=check_url, headers=headers, json={"itemIds": correct_combo}) as check_response:
-                        check_response.raise_for_status()
-                        result = await check_response.json()
-                        correct_matching = result.get('correctMatching', 0)
-                        bonus_amount = float(result.get('bonusAmount', 0))
-                        if bonus_amount > 0:
-                            logger.success(f"{self.session_name} | Combo solved! Matched {correct_matching}/4 items, Reward: {bonus_amount:.2f} HONEY")
-                        else:
-                            logger.info(f"{self.session_name} | Combo didn't win. Matched {correct_matching}/4 items")
-                        return True
-                available_items = [item['id'] for item in combo_data['data']['items']]
-                random_combo = random.sample(available_items, settings.COMBO_ITEMS_COUNT)
-                logger.info(f"{self.session_name} | Trying random combo: {random_combo}")
-                check_url = 'https://api.beeharvest.life/combo_game/check_combo'
-                async with session.post(url=check_url, headers=headers, json={"itemIds": random_combo}) as check_response:
-                    check_response.raise_for_status()
-                    result = await check_response.json()
-                    correct_matching = result.get('correctMatching', 0)
-                    bonus_amount = float(result.get('bonusAmount', 0))
-                    if bonus_amount > 0:
-                        logger.success(f"{self.session_name} | Random combo won! Matched {correct_matching}/4 items, Reward: {bonus_amount:.2f} HONEY")
-                    else:
-                        logger.info(f"{self.session_name} | Random combo didn't win. Matched {correct_matching}/4 items")
+
         except Exception as error:
             logger.error(f"{self.session_name} | Error working with combo: {str(error)}")
             return False

@@ -106,6 +106,8 @@ SQUAD_ID = 4acFkDo5​​​​​​​​​​​​​​​​
 | **SQUAD_ID_APP**          |                  | Target squad ID in app                                       |
 | **USE_PROXY_FROM_FILE**   | False                | Use proxies from proxies.txt file                             |
 | **ENABLE_WALLET_BINDING**  | False               | Enable wallet binding                                    |
+| **COMBO_MANUAL_MODE**      | True               | Enable manual combo mode                                    |
+| **COMBO_SKIP_IF_NO_SOLUTION** | True               | Skip combo if no solution                                    |
 | **MULTITHREADING**        | False                | Enable multithreading mode                                    |
 | **DELAY_BEFORE_START**    | [1, 5]               | Delay before session start (sec)                              |
 | **DELAY_BETWEEN_ACTIONS** | [1, 3]               | Delay between actions (sec)                                   |
